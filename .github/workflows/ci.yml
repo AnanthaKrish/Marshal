@@ -1,0 +1,51 @@
+name: Build and test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+
+jobs:
+  macos:
+    name: macOS · Apple silicon
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          swift --version
+      - name: Validate release scripts
+        run: |
+          python3 Scripts/test-release.py
+      - name: Test
+        run: swift test
+      - name: Build and check local preview packages
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          Scripts/package-release.sh --preview "v$version"
+      - name: Save local preview packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Marshal-local-preview-arm64
+          path: |
+            build/release-preview/**/*.dmg
+            build/release-preview/**/*.zip
+            build/release-preview/**/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

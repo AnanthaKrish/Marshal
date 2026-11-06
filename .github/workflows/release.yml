@@ -1,0 +1,103 @@
+name: Prepare Mac release (optional cloud signing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+  RELEASE_TAG: ${{ github.ref_name }}
+
+jobs:
+  release:
+    name: Sign, notarize, and prepare draft
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check tag and existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REF_TYPE" = tag || { echo 'Run this optional workflow on an existing version tag.' >&2; exit 1; }
+          test "$(uname -m)" = arm64
+          export MARSHAL_ROOT="$GITHUB_WORKSPACE"
+          source Scripts/release-common.sh
+          marshal_validate_tag "$RELEASE_TAG"
+          if existing=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$existing" = true || { echo 'Refusing to replace a published release.' >&2; exit 1; }
+          fi
+      - name: Validate and test
+        run: |
+          python3 Scripts/test-release.py
+          swift test
+      - name: Import Developer ID and notarization credentials
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: Scripts/import-signing.sh
+      - name: Build, notarize, and verify release files
+        env:
+          MARSHAL_BUILD_NUMBER: ${{ github.run_number }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: Scripts/package-release.sh "$RELEASE_TAG"
+      - name: Save verified release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Marshal-${{ github.ref_name }}-arm64
+          path: |
+            build/releases/**/*.dmg
+            build/releases/**/*.zip
+            build/releases/**/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Prepare draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          directory="build/releases/$RELEASE_TAG"
+          cat > "$RUNNER_TEMP/marshal-release-notes.md" <<'NOTES'
+          ## Install Marshal
+
+          Download the **macOS-arm64.dmg**, open it, and drag **Marshal.app** into Applications.
+          Requires **Apple silicon (M1 or later)** and **macOS 14 or later**. No Xcode installation needed.
+
+          The app and bundled CLI are Developer ID signed. The app and disk image are notarized and stapled.
+          A ZIP and SHA-256 checksums are also included. Watch-time tracking remains deferred.
+
+          Before publishing this draft, install the DMG on a clean Mac and check first launch and agent setup.
+          NOTES
+          if existing=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
+            test "$existing" = true || { echo 'Refusing to replace a published release.' >&2; exit 1; }
+          else
+            release_options=(--draft --verify-tag --generate-notes)
+            if [[ "$version" == 0.* || "$version" == *-* ]]; then release_options+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Marshal $version" --notes-file "$RUNNER_TEMP/marshal-release-notes.md" "${release_options[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$directory/Marshal-$version-macOS-arm64.dmg" \
+            "$directory/Marshal-$version-macOS-arm64.zip" "$directory/SHA256SUMS.txt"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove signing material
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/marshal-release.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/marshal-release.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/marshal-signing.p12"

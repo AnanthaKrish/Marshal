@@ -1,0 +1,29 @@
+.build/
+build/
+*.xcodeproj
+*.xcworkspace
+.swiftpm/
+.DS_Store
+DerivedData/
+.superpowers/
+.local-notes/
+
+# Recreated by make readme-art; only the finished artwork is published.
+/docs/media/pookie-reference.png
+
+# Local credentials and certificate requests.
+.env
+.env.*
+!.env.example
+*.certSigningRequest
+*.csr
+*.cer
+*.pem
+*.key
+
+# Signing material belongs in Keychain / GitHub secrets, never in Git.
+*.p12
+*.pfx
+*.p8
+*.keychain
+*.keychain-db
