@@ -25,7 +25,7 @@ struct HookMappingTests {
 
     @Test func claudeNotificationsMap() {
         #expect(HookMapper.map(agent: .claudeCode, payload: payload("Notification", notification: "permission_prompt"), now: now)?.state == .needsPermission)
-        #expect(HookMapper.map(agent: .claudeCode, payload: payload("Notification", notification: "idle_prompt"), now: now)?.state == .needsInput)
+        #expect(HookMapper.map(agent: .claudeCode, payload: payload("Notification", notification: "idle_prompt"), now: now) == nil)
         #expect(HookMapper.map(agent: .claudeCode, payload: payload("Notification", notification: "agent_needs_input"), now: now)?.state == .needsInput)
         #expect(HookMapper.map(agent: .claudeCode, payload: payload("Notification", notification: "auth_success"), now: now) == nil)
     }
@@ -42,7 +42,7 @@ struct HookMappingTests {
     }
 
     @Test func unmappedEventsReturnNil() {
-        #expect(HookMapper.map(agent: .claudeCode, payload: payload("PostToolUse"), now: now) == nil)
+        #expect(HookMapper.map(agent: .claudeCode, payload: payload("UnknownEvent"), now: now) == nil)
         #expect(HookMapper.map(agent: .codex, payload: payload("SubagentStart"), now: now) == nil)
     }
 
@@ -71,7 +71,7 @@ struct HookMappingTests {
                             "\(agent.rawValue) \(event) \(type)")
                 }
             } else {
-                #expect(HookMapper.map(agent: agent, payload: payload(event), now: now) != nil, "\(agent.rawValue) \(event)")
+                #expect(HookMapper.map(agent: agent, payload: HookPayload(sessionId: "s1", hookEventName: event, status: "completed"), now: now) != nil, "\(agent.rawValue) \(event)")
             }
         }
     }

@@ -37,11 +37,17 @@ public struct AgentEvent: Codable, Equatable, Sendable {
     public var at: Date?
     public var appPath: String?
     public var appPid: Int32?
+    public var host: SessionHost?
+    public var turnID: String?
+    /// Hook name only; never prompt or tool input content.
+    public var eventKind: String?
+    public var toolName: String?
 
     public init(agent: String, session: String, state: AgentState,
                 title: String? = nil, project: String? = nil,
                 message: String? = nil, at: Date? = nil,
-                appPath: String? = nil, appPid: Int32? = nil) {
+                appPath: String? = nil, appPid: Int32? = nil, host: SessionHost? = nil,
+                turnID: String? = nil, eventKind: String? = nil, toolName: String? = nil) {
         self.v = 1
         self.agent = agent
         self.session = session
@@ -52,10 +58,14 @@ public struct AgentEvent: Codable, Equatable, Sendable {
         self.at = at
         self.appPath = appPath
         self.appPid = appPid
+        self.host = host
+        self.turnID = turnID
+        self.eventKind = eventKind
+        self.toolName = toolName
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, agent, session, state, title, project, message, at, appPath, appPid
+        case v, agent, session, state, title, project, message, at, appPath, appPid, host, turnID, eventKind, toolName
     }
 
     public init(from decoder: any Decoder) throws {
@@ -70,6 +80,10 @@ public struct AgentEvent: Codable, Equatable, Sendable {
         // Lenient like `at`: an unreadable app field is dropped, never the event.
         appPath = (try? c.decodeIfPresent(String.self, forKey: .appPath)) ?? nil
         appPid = (try? c.decodeIfPresent(Int32.self, forKey: .appPid)) ?? nil
+        host = try? c.decodeIfPresent(SessionHost.self, forKey: .host)
+        turnID = try? c.decodeIfPresent(String.self, forKey: .turnID)
+        eventKind = try? c.decodeIfPresent(String.self, forKey: .eventKind)
+        toolName = try? c.decodeIfPresent(String.self, forKey: .toolName)
         // Lenient: an `at` Marshal cannot read is dropped, never the event.
         at = (try? c.decodeIfPresent(String.self, forKey: .at)).flatMap(Self.parseDate)
     }
@@ -83,6 +97,10 @@ public struct AgentEvent: Codable, Equatable, Sendable {
         try c.encodeIfPresent(title, forKey: .title)
         try c.encodeIfPresent(project, forKey: .project)
         try c.encodeIfPresent(message, forKey: .message)
+        try c.encodeIfPresent(host, forKey: .host)
+        try c.encodeIfPresent(turnID, forKey: .turnID)
+        try c.encodeIfPresent(eventKind, forKey: .eventKind)
+        try c.encodeIfPresent(toolName, forKey: .toolName)
         try c.encodeIfPresent(at.map(Self.formatDate), forKey: .at)
         try c.encodeIfPresent(appPath, forKey: .appPath)
         try c.encodeIfPresent(appPid, forKey: .appPid)

@@ -90,7 +90,7 @@ public final class FocusCoordinator: ObservableObject {
     public func stop() { task?.cancel(); task = nil }
 
     public func update(sessions: [AgentSession], conditions: VitalsConditions) {
-        self.sessions = sessions
+        self.sessions = sessions.filter(\.isCurrent)
         self.conditions = conditions
         tick()
     }

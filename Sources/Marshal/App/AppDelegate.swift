@@ -30,6 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.focus.update(sessions: sessions, conditions: conditions)
             }
             .store(in: &focusSubscriptions)
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.agents.expire() }
+            }
+            .store(in: &focusSubscriptions)
         focus.start()
         startAgentServer()
         robot = RobotWindowController(state: state, agents: agents, vitals: vitals, focus: focus, usage: usage, watch: watch)

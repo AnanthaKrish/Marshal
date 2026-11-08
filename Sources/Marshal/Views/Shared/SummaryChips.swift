@@ -34,7 +34,7 @@ struct SummaryChips: View {
     }
 
     static func items(for sessions: [AgentSession]) -> [Item] {
-        func count(_ state: AgentState) -> Int { sessions.lazy.filter { $0.state == state }.count }
+        func count(_ state: AgentState) -> Int { sessions.lazy.filter { $0.isCurrent && $0.state == state }.count }
         let counts: [(AgentState, Int, (Int) -> String)] = [
             (.working, count(.working), { "\($0) working" }),
             (.needsPermission, count(.needsPermission), { "\($0) needs you" }),

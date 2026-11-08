@@ -5,10 +5,12 @@ import SwiftUI
 struct StatePill: View {
     var state: AgentState
     var style: SurfaceStyle
+    var health: SessionHealth = .current
 
     var body: some View {
-        let tint = Self.tint(for: state, style: style)
-        Text(Self.label(for: state))
+        let tint = health == .current ? Self.tint(for: state, style: style) : style.secondary
+        Label(health == .current ? Self.label(for: state) : health.label, systemImage: health == .disconnected ? "bolt.slash" : "clock")
+            .labelStyle(HealthLabelStyle(showsIcon: health != .current))
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .foregroundStyle(tint)
             // Bright tints wash out on the light card; darken the text there only.
@@ -39,6 +41,16 @@ struct StatePill: View {
         case .error: RobotPalette.alert
         case .working: RobotPalette.working
         case .done, .idle, .ended: style.secondary
+        }
+    }
+}
+
+private struct HealthLabelStyle: LabelStyle {
+    var showsIcon: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            if showsIcon { configuration.icon }
+            configuration.title
         }
     }
 }

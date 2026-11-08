@@ -22,6 +22,7 @@ struct AgentBadge: View {
         switch agent {
         case HookAgent.claudeCode.rawValue: "terminal"
         case HookAgent.codex.rawValue: "chevron.left.forwardslash.chevron.right"
+        case HookAgent.cursor.rawValue: "cursorarrow"
         default: "circle.dotted"
         }
     }
@@ -30,6 +31,7 @@ struct AgentBadge: View {
         switch agent {
         case HookAgent.claudeCode.rawValue: Color(red: 0.85, green: 0.47, blue: 0.30)   // warm orange
         case HookAgent.codex.rawValue: Color(red: 0.10, green: 0.62, blue: 0.54)        // teal
+        case HookAgent.cursor.rawValue: Color(red: 0.51, green: 0.58, blue: 0.95)
         default: Color(white: 0.55)
         }
     }

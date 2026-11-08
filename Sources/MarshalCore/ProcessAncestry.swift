@@ -47,6 +47,54 @@ public enum ProcessAncestry {
         return best
     }
 
+    /// Only recognized persistent agent processes qualify, never a shell/hook subprocess.
+    public static func sessionHost(for agent: HookAgent, of pid: Int32 = getpid()) -> SessionHost? {
+        var current = parentPid(of: pid)
+        for _ in 0..<maxHops {
+            guard let candidate = current, candidate > 1 else { break }
+            if let path = executablePath(of: candidate), isSessionExecutable(path, agent: agent),
+               let startedAt = processStart(candidate) {
+                return SessionHost(pid: candidate, startedAt: startedAt)
+            }
+            current = parentPid(of: candidate)
+        }
+        return nil
+    }
+
+    static func isSessionExecutable(_ path: String, agent: HookAgent) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        switch agent {
+        case .claudeCode:
+            return name == "claude" || path.contains("/claude/versions/")
+        case .codex:
+            return name == "codex" || name == "codex-aarch64-apple-darwin" || name == "codex-x86_64-apple-darwin"
+        case .cursor:
+            return name == "Cursor" && path.contains(".app/Contents/MacOS/")
+        }
+    }
+
+    /// nil means we cannot verify; only ESRCH/empty process information proves exit.
+    public static func isRunning(_ host: SessionHost) -> Bool? {
+        guard host.pid > 1, host.startedAt > 0 else { return nil }
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, host.pid]
+        let result = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
+        if result != 0 { return errno == ESRCH ? false : nil }
+        guard size > 0 else { return false }
+        let start = info.kp_proc.p_starttime
+        return UInt64(start.tv_sec) * 1_000_000 + UInt64(start.tv_usec) == host.startedAt
+    }
+
+    private static func processStart(_ pid: Int32) -> UInt64? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_starttime
+        return UInt64(start.tv_sec) * 1_000_000 + UInt64(start.tv_usec)
+    }
+
     static func parentPid(of pid: Int32) -> Int32? {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride

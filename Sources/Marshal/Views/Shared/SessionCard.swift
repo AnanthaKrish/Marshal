@@ -26,7 +26,7 @@ struct SessionCard: View {
                     state.collapseAll()
                 } label: { row(showsChip: showsChip) }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Open \(session.title ?? session.agent) in \(AppOpener.appName(for: session) ?? "app"). \(StatePill.label(for: session.state))")
+                .accessibilityLabel("Open \(session.title ?? session.agent) in \(AppOpener.appName(for: session) ?? "app"). \(statusLabel)")
             } else {
                 row(showsChip: false)
             }
@@ -37,6 +37,9 @@ struct SessionCard: View {
         .contextMenu {
             if canOpen {
                 Button("Open") { AppOpener.open(session); state.collapseAll() }
+            }
+            if !session.isCurrent, let provider = HookAgent(rawValue: session.agent) {
+                Button("Check \(provider.displayName) setup") { SetupPresenter.install(provider) }
             }
             Button("Dismiss") { agents.dismiss(session.id) }
         }
@@ -61,12 +64,18 @@ struct SessionCard: View {
                     .foregroundStyle(.white.opacity(0.95))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 5) {
-                    Circle().fill(StatePill.tint(for: session.state, style: style))
-                        .frame(width: 4, height: 4)
-                    Text(StatePill.label(for: session.state))
-                        .foregroundStyle(StatePill.tint(for: session.state, style: style))
+                    if session.isCurrent {
+                        Circle().fill(statusTint).frame(width: 4, height: 4)
+                    } else {
+                        Image(systemName: session.health == .stale ? "clock" : "bolt.slash")
+                            .foregroundStyle(statusTint)
+                    }
+                    Text(statusLabel)
+                        .foregroundStyle(statusTint)
                         .fixedSize()
-                    if let message = session.message, !message.isEmpty {
+                    if !session.isCurrent {
+                        Text("· Last: \(StatePill.label(for: session.state))").foregroundStyle(style.secondary)
+                    } else if let message = session.message, !message.isEmpty {
                         Text("· \(message)").foregroundStyle(style.secondary)
                     }
                     Spacer(minLength: 0)
@@ -80,7 +89,7 @@ struct SessionCard: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(isHovered ? 1 : 0.75))
                 }
-                ElapsedText(since: session.since)
+                ElapsedText(since: session.isCurrent ? session.since : session.lastSeen, prefix: session.isCurrent ? "" : "Updated ")
                     .font(.system(size: 9)).foregroundStyle(style.secondary)
             }
             .fixedSize()
@@ -91,7 +100,7 @@ struct SessionCard: View {
         .frame(height: 40)
         .background(.white.opacity(isHovered ? 0.10 : 0.035), in: RoundedRectangle(cornerRadius: 8))
         .contentShape(RoundedRectangle(cornerRadius: 8))
-        .help([session.title, session.project, session.message].compactMap { $0 }.joined(separator: " · "))
+        .help(sessionHelp)
     }
 
     private func cardRow(showsChip: Bool) -> some View {
@@ -104,12 +113,12 @@ struct SessionCard: View {
                         .foregroundStyle(style.primary)
                     Spacer(minLength: 4)
                     ContextUsageBadge(value: usage.contexts[session.id], style: style)
-                    ElapsedText(since: session.since)
+                    ElapsedText(since: session.isCurrent ? session.since : session.lastSeen, prefix: session.isCurrent ? "" : "Updated ")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(style.secondary)
                 }
                 HStack(spacing: 5) {
-                    StatePill(state: session.state, style: style)
+                    StatePill(state: session.state, style: style, health: session.health)
                     detail(showsPath: !showsChip)
                     Spacer(minLength: 0)
                     if showsChip {
@@ -131,11 +140,13 @@ struct SessionCard: View {
     /// to the Open chip while hovered.
     private func detail(showsPath: Bool) -> some View {
         HStack(spacing: 4) {
-            if let message = session.message, !message.isEmpty {
+            if !session.isCurrent {
+                Text("Last: \(StatePill.label(for: session.state))").help(sessionHelp)
+            } else if let message = session.message, !message.isEmpty {
                 Text(message)
                     .layoutPriority(1)
             }
-            if showsPath, let project = session.project, !project.isEmpty {
+            if session.isCurrent, showsPath, let project = session.project, !project.isEmpty {
                 let path = Self.shortPath(project)
                 Text(session.message?.isEmpty == false ? "· \(path)" : path)
                     .layoutPriority(-1)
@@ -143,6 +154,14 @@ struct SessionCard: View {
         }
         .font(.system(size: 11, weight: .medium, design: .rounded))
         .foregroundStyle(style.secondary)
+    }
+
+    private var statusLabel: String { session.isCurrent ? StatePill.label(for: session.state) : session.health.label }
+    private var statusTint: Color { session.isCurrent ? StatePill.tint(for: session.state, style: style) : style.secondary }
+    private var sessionHelp: String {
+        let age = Self.elapsed(from: session.lastSeen, to: .now)
+        return "\(statusLabel). Last reported: \(StatePill.label(for: session.state)). Last update: \(age) ago. "
+            + [session.title, session.project].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var background: Color {
@@ -188,12 +207,13 @@ extension EnvironmentValues {
 /// Time since `since`, refreshed each minute.
 struct ElapsedText: View {
     var since: Date
+    var prefix = ""
 
     var body: some View {
         // The timeline only triggers a redraw each minute; its entry dates
         // fall on minute boundaries, so read the clock directly.
         TimelineView(.everyMinute) { _ in
-            Text(SessionCard.elapsed(from: since, to: .now))
+            Text(prefix + SessionCard.elapsed(from: since, to: .now))
                 .monospacedDigit()
         }
     }
@@ -230,11 +250,11 @@ struct SessionChip: View {
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(style.primary)
             Circle()
-                .fill(StatePill.tint(for: session.state, style: style))
+                .fill(statusTint)
                 .frame(width: 6, height: 6)
-                .help(StatePill.label(for: session.state))
+                .help(statusLabel)
             Spacer(minLength: 4)
-            ElapsedText(since: session.since)
+            ElapsedText(since: session.isCurrent ? session.since : session.lastSeen, prefix: session.isCurrent ? "" : "Updated ")
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(style.secondary)
                 // The title truncates first; the elapsed time stays whole.
@@ -253,6 +273,9 @@ struct SessionChip: View {
             if canOpen {
                 Button("Open") { open() }
             }
+            if !session.isCurrent, let provider = HookAgent(rawValue: session.agent) {
+                Button("Check \(provider.displayName) setup") { SetupPresenter.install(provider) }
+            }
             Button("Dismiss") { agents.dismiss(session.id) }
         }
     }
@@ -262,6 +285,9 @@ struct SessionChip: View {
         AppOpener.open(session)
         onOpen?()
     }
+
+    private var statusLabel: String { session.isCurrent ? StatePill.label(for: session.state) : session.health.label }
+    private var statusTint: Color { session.isCurrent ? StatePill.tint(for: session.state, style: style) : style.secondary }
 
     private var background: Color {
         switch style {

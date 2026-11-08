@@ -5,6 +5,7 @@ import MarshalCore
 /// alerts are the only Marshal UI that takes focus from the frontmost app.
 @MainActor
 enum SetupPresenter {
+    static let didChange = Notification.Name("MarshalAgentSetupChanged")
     static func connectUsage() {
         let alert = NSAlert()
         do {
@@ -24,7 +25,7 @@ enum SetupPresenter {
         let file = HookInstaller.defaultFile(for: agent)
 
         let confirm = NSAlert()
-        confirm.messageText = "Set up \(name(of: agent))?"
+        confirm.messageText = "Set up \(agent.displayName)?"
         confirm.informativeText = "Marshal will add hooks to \(file.path). A backup is made first."
         confirm.addButton(withTitle: "OK")
         confirm.addButton(withTitle: "Cancel")
@@ -36,24 +37,28 @@ enum SetupPresenter {
         do {
             switch try HookInstaller.write(agent: agent, shimPath: MarshalPaths.shim.path, into: file) {
             case .added:
-                result.messageText = "\(name(of: agent)) is set up"
+                result.messageText = "\(agent.displayName) is set up"
                 result.informativeText = "Hooks were added to \(file.path). New sessions will report to Marshal."
+            case .updated:
+                result.messageText = "\(agent.displayName) hooks are updated"
+                result.informativeText = "Restart your agent session to use the reliability fixes. Existing hooks were kept in place."
             case .alreadyPresent:
-                result.messageText = "\(name(of: agent)) was already set up"
+                result.messageText = "\(agent.displayName) was already set up"
                 result.informativeText = "\(file.path) already has Marshal's hooks. Nothing was changed."
             }
         } catch {
             result.alertStyle = .warning
-            result.messageText = "Couldn't set up \(name(of: agent))"
+            result.messageText = "Couldn't set up \(agent.displayName)"
             result.informativeText = "\(file.path) was not changed: \(error)"
         }
+        if result.alertStyle != .warning, agent == .codex {
+            result.informativeText += " Review and trust Marshal's updated hooks at the next interactive startup."
+        }
+        if result.alertStyle != .warning, agent == .cursor {
+            result.informativeText += " Start a local Agent chat. If it doesn't appear, check Cursor's Hooks output or restart Cursor."
+        }
+        NotificationCenter.default.post(name: didChange, object: nil)
         result.runModal()
     }
 
-    private static func name(of agent: HookAgent) -> String {
-        switch agent {
-        case .claudeCode: "Claude Code"
-        case .codex: "Codex"
-        }
-    }
 }

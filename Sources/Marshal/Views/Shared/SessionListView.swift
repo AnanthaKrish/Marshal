@@ -55,31 +55,48 @@ struct SessionListView: View {
 struct AgentsEmptyState: View {
     var style: SurfaceStyle
     @EnvironmentObject private var agents: AgentSessionStore
+    @State private var installations: [HookAgent: HookInstaller.Installation] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(agents.serverError.map { "Marshal can't listen for agents: \($0)" } ?? "Your agents will appear here. Connect one to get started.")
+            Text(agents.serverError.map { "Marshal can't listen for agents: \($0)" }
+                 ?? (installations.values.contains { $0 == .ready }
+                     ? "Waiting for activity. Start a new chat in a connected app."
+                     : "Connect your agents to see their chats here."))
                 .lineLimit(3)
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(style.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            // Side by side when they fit, stacked in the narrow robot card.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { setupButtons }
                 VStack(alignment: .leading, spacing: 8) { setupButtons }
             }
         }
+        .task { refreshInstallations() }
+        .onReceive(NotificationCenter.default.publisher(for: SetupPresenter.didChange)) { _ in refreshInstallations() }
+    }
+
+    private func refreshInstallations() {
+        installations = Dictionary(uniqueKeysWithValues: HookAgent.allCases.map { ($0, HookInstaller.installation(for: $0)) })
+    }
+
+    private func title(_ agent: HookAgent) -> String {
+        switch installations[agent] ?? .missing {
+        case .ready: "\(agent.displayName) · Waiting"
+        case .needsUpdate: "Update \(agent.displayName)"
+        case .unreadable: "Check \(agent.displayName)"
+        case .missing: "Set up \(agent.displayName)"
+        }
     }
 
     @ViewBuilder
     private var setupButtons: some View {
-        QuickActionButton(title: "Set up Claude Code", systemImage: "terminal", style: style) {
-            SetupPresenter.install(.claudeCode)
+        ForEach(HookAgent.allCases, id: \.self) { agent in
+            QuickActionButton(title: title(agent), systemImage: AgentBadge.glyph(for: agent.rawValue), style: style) {
+                SetupPresenter.install(agent)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .help(installations[agent] == .ready ? "Hooks installed; waiting for the first event. Click to check setup." : "Set up or repair this integration.")
         }
-        .fixedSize(horizontal: true, vertical: false)
-        QuickActionButton(title: "Set up Codex", systemImage: "chevron.left.forwardslash.chevron.right", style: style) {
-            SetupPresenter.install(.codex)
-        }
-        .fixedSize(horizontal: true, vertical: false)
     }
 }

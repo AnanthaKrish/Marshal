@@ -350,6 +350,21 @@ enum Snapshot {
                                 project: "/tmp/Marshal", appPath: "/System/Applications/Utilities/Terminal.app"))
         panels("single-chat")
 
+        // Current, uncertain and disconnected sessions use the same compact panels.
+        agents.clearAll()
+        let healthNow = Date.now
+        agents.apply(AgentEvent(agent: "claude-code", session: "old-approval", state: .needsPermission,
+                                title: "Earlier approval", message: "Bash", at: healthNow - 1900), now: healthNow - 1900)
+        agents.apply(AgentEvent(agent: "codex", session: "closed-host", state: .working,
+                                title: "Closed terminal session", at: healthNow - 120,
+                                host: SessionHost(pid: 999, startedAt: 1)), now: healthNow - 120)
+        agents.expire(now: healthNow, isHostRunning: { _ in false })
+        agents.apply(AgentEvent(agent: "cursor", session: "cursor-live", state: .working,
+                                title: "Cursor · Polish chat layout", project: "/tmp/Marshal",
+                                at: healthNow, appPath: "/Applications/Cursor.app"), now: healthNow)
+        panels("session-health")
+        panels("session-health-dark", dark: true)
+
         let critical = Vitals(cpu: 0.93, cpuRaw: 0.93, memoryUsed: 34 << 30, memoryTotal: 36 << 30,
                               memoryPressure: .critical, thermal: .critical, batteryLevel: 8,
                               sampledAt: clock.now)

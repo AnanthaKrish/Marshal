@@ -12,8 +12,15 @@ public enum SocketClient {
         defer { close(fd) }
         return line.withUnsafeBytes { buffer in
             var offset = 0
+            let deadline = ProcessInfo.processInfo.systemUptime + 0.2
             while offset < buffer.count {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
                 let written = write(fd, buffer.baseAddress! + offset, buffer.count - offset)
+                if written < 0 && (errno == EAGAIN || errno == EINTR) {
+                    var pending = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                    _ = poll(&pending, 1, 10)
+                    continue
+                }
                 if written <= 0 { return false }
                 offset += written
             }
@@ -28,7 +35,7 @@ public enum SocketClient {
         return true
     }
 
-    /// A blocking socket connected to `path`, with a short send timeout and no SIGPIPE.
+    /// Nonblocking connection and writes have deadlines; a wedged receiver cannot stall hooks.
     private static func connectedSocket(to path: String) -> Int32? {
         guard var addr = unixAddress(path) else { return nil }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -37,14 +44,21 @@ public enum SocketClient {
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         var tv = timeout
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { close(fd); return nil }
         let result = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard result == 0 else {
-            close(fd)
-            return nil
+        if result != 0 {
+            guard errno == EINPROGRESS else { close(fd); return nil }
+            var pending = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            var error: Int32 = 0
+            var length = socklen_t(MemoryLayout<Int32>.size)
+            guard poll(&pending, 1, 200) > 0,
+                  getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0, error == 0 else {
+                close(fd); return nil
+            }
         }
         return fd
     }

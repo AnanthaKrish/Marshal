@@ -149,7 +149,7 @@ struct NotchWidgetView: View {
             return vitals.isAlert ? RobotPalette.alert : RobotPalette.attention
         }
         if agents.needsYouCount > 0 {
-            return agents.sessions.contains { $0.state == .error } ? RobotPalette.alert : RobotPalette.attention
+            return agents.currentSessions.contains { $0.state == .error } ? RobotPalette.alert : RobotPalette.attention
         }
         return RobotPalette.attention.opacity(0.8)
     }

@@ -50,7 +50,7 @@ struct AgentSessionStoreTests {
         store.apply(permission, now: t0 + 2)
         store.apply(working, now: t0 + 3)
         #expect(store.sessions[0].state == .needsPermission && store.attentionPulse == 1)
-        #expect(store.sessions[0].message == "Bash" && store.sessions[0].since == t0 + 2 && store.sessions[0].lastSeen == t0 + 3)
+        #expect(store.sessions[0].message == "Bash" && store.sessions[0].since == t0 + 2 && store.sessions[0].lastSeen == t0 + 2)
         store.apply(ev(.working), now: t0 + 4)   // no `at`: always applies
         #expect(store.sessions[0].state == .working)
     }
@@ -74,12 +74,12 @@ struct AgentSessionStoreTests {
         store.expire(now: t0 + 599)
         #expect(store.sessions.first { $0.session == "a" }?.state == .needsInput)
         store.expire(now: t0 + 601)
-        #expect(store.sessions.first { $0.session == "a" }?.state == .idle)
+        #expect(store.sessions.first { $0.session == "a" }?.health == .stale)
         #expect(store.sessions.first { $0.session == "b" }?.state == .needsPermission)
         store.expire(now: t0 + 1801)
-        #expect(store.sessions.first { $0.session == "b" }?.state == .idle)
-        #expect(store.sessions.first { $0.session == "c" }?.state == .idle)
-        #expect(store.sessions.first { $0.session == "d" }?.state == .idle)   // working expires too
+        #expect(store.sessions.first { $0.session == "b" }?.health == .stale)
+        #expect(store.sessions.first { $0.session == "c" }?.health == .stale)
+        #expect(store.sessions.first { $0.session == "d" }?.health == .stale)   // working expires too
         store.expire(now: t0 + 43_201)
         #expect(store.sessions.isEmpty)
     }
@@ -114,13 +114,13 @@ struct AgentSessionStoreTests {
         #expect(store.lastDoneAt == t0 + 4)
     }
 
-    @Test func workingExpiresToIdleAfterThirtyMinutes() {
+    @Test func workingBecomesStaleWithoutLosingItsLastState() {
         let store = AgentSessionStore()
         store.apply(ev(.working), now: t0)
         store.expire(now: t0 + 1799)
         #expect(store.sessions[0].state == .working)
         store.expire(now: t0 + 1801)
-        #expect(store.sessions[0].state == .idle)
+        #expect(store.sessions[0].state == .working && store.sessions[0].health == .stale)
         #expect(store.anyWorking == false)
     }
 

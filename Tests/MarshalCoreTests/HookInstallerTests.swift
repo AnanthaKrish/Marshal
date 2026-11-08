@@ -11,13 +11,13 @@ struct HookInstallerTests {
 
     @Test func fragmentListsTheRightEvents() {
         let claude = HookInstaller.fragment(for: .claudeCode, shimPath: shim)["hooks"] as! [String: Any]
-        #expect(Set(claude.keys) == ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"])
+        #expect(Set(claude.keys) == ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "StopFailure", "SessionEnd"])
         let codex = HookInstaller.fragment(for: .codex, shimPath: shim)["hooks"] as! [String: Any]
-        #expect(Set(codex.keys) == ["UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"])
+        #expect(Set(codex.keys) == ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Interrupt", "Stop", "SessionEnd"])
         let notif = (claude["Notification"] as! [[String: Any]])[0]
-        #expect(notif["matcher"] as? String == "permission_prompt|idle_prompt|agent_needs_input")
+        #expect(notif["matcher"] as? String == "permission_prompt|agent_needs_input")
         let entry = ((claude["Stop"] as! [[String: Any]])[0]["hooks"] as! [[String: Any]])[0]
-        #expect(entry["command"] as? String == "\(shim) hook claude-code" && entry["async"] as? Bool == true && entry["timeout"] as? Int == 5)
+        #expect(entry["command"] as? String == "'\(shim)' hook claude-code Stop" && entry["async"] as? Bool == false && entry["timeout"] as? Int == 1)
         let end = ((claude["SessionEnd"] as! [[String: Any]])[0]["hooks"] as! [[String: Any]])[0]
         #expect(end["timeout"] == nil)
         for agent in HookAgent.allCases {
@@ -38,15 +38,13 @@ struct HookInstallerTests {
         return file
     }
 
-    @Test func writeOnSevenHookInstallAddsNothing() throws {
+    @Test func oldInstallationUpgradesInPlaceAndThenIsIdempotent() throws {
         let file = try writeLegacySevenHookFile()
-        let before = try Data(contentsOf: file)
-        let dir = file.deletingLastPathComponent()
-        let siblingsBefore = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix(file.lastPathComponent) }
+        #expect(try HookInstaller.write(agent: .codex, shimPath: shim, into: file) == .updated)
+        let upgraded = try Data(contentsOf: file)
+        #expect(try hooks(file)["PostToolUse"] != nil)
         #expect(try HookInstaller.write(agent: .codex, shimPath: shim, into: file) == .alreadyPresent)
-        #expect(try Data(contentsOf: file) == before)
-        let siblingsAfter = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix(file.lastPathComponent) }
-        #expect(siblingsAfter == siblingsBefore)
+        #expect(try Data(contentsOf: file) == upgraded)
     }
 
     @Test func removeClearsLegacySevenHooks() throws {
@@ -60,7 +58,7 @@ struct HookInstallerTests {
     @Test func writeCreatesMissingFile() throws {
         let file = tempFile()
         #expect(try HookInstaller.write(agent: .codex, shimPath: shim, into: file) == .added)
-        #expect(Set(try hooks(file).keys) == ["UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"])
+        #expect(Set(try hooks(file).keys) == ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Interrupt", "Stop", "SessionEnd"])
     }
 
     @Test func writeAddsHooksKeyWhenAbsent() throws {
@@ -69,7 +67,7 @@ struct HookInstallerTests {
         _ = try HookInstaller.write(agent: .claudeCode, shimPath: shim, into: file)
         let root = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
         #expect(root["model"] as? String == "opus" && (root["permissions"] as? [String: Any]) != nil)
-        #expect(try hooks(file).count == 8)
+        #expect(try hooks(file).count == 10)
     }
 
     @Test func writeAppendsAfterExistingGroupsAndIsIdempotent() throws {
@@ -121,7 +119,7 @@ struct HookInstallerTests {
         #expect(try HookInstaller.write(agent: .claudeCode, shimPath: shim, into: link) == .added)
         let type = try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType
         #expect(type == .typeSymbolicLink)
-        #expect(try hooks(target).count == 8)
+        #expect(try hooks(target).count == 10)
         #expect(try HookInstaller.remove(agent: .claudeCode, from: link).removed)
         #expect((try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType) == .typeSymbolicLink)
     }
@@ -146,5 +144,92 @@ struct HookInstallerTests {
                 .filter { $0.hasPrefix(file.lastPathComponent + ".marshal-backup-") }
             #expect(backups.isEmpty)
         }
+    }
+}
+
+struct ProviderInstallerTests {
+    private func file() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("marshal-provider-\(UUID()).json") }
+    private let shim = "/Users/O'Neil Work/.marshal/bin/marshal"
+
+    @Test func cursorFlatSchemaPreservesOtherHooksAndSettings() throws {
+        let file = file()
+        let original = #"{"version":1,"custom":"keep","hooks":{"stop":[{"command":"/other/hook","timeout":7}],"beforeTabFileRead":[{"command":"/policy"}],"unrelatedEmpty":[]}}"#
+        try Data(original.utf8).write(to: file)
+        #expect(try HookInstaller.write(agent: .cursor, shimPath: shim, into: file) == .added)
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        let hooks = root["hooks"] as! [String: Any]
+        let stops = hooks["stop"] as! [[String: Any]]
+        #expect(root["version"] as? Int == 1 && root["custom"] as? String == "keep")
+        #expect(stops.count == 2 && stops[0]["command"] as? String == "/other/hook")
+        #expect(stops[1]["hooks"] == nil && stops[1]["async"] == nil)
+        #expect(try HookInstaller.write(agent: .cursor, shimPath: shim, into: file) == .alreadyPresent)
+        #expect(try HookInstaller.remove(agent: .cursor, from: file).removed)
+        let restored = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! NSDictionary
+        #expect(try restored.isEqual(to: JSONSerialization.jsonObject(with: Data(original.utf8)) as! [AnyHashable: Any]))
+        #expect(try HookInstaller.remove(agent: .cursor, from: file).removed == false)
+    }
+
+    @Test func removalKeepsOtherHandlersInTheSameGroupAndOtherProviders() throws {
+        let file = file()
+        let original = #"{"hooks":{"Stop":[{"matcher":"keep","hooks":[{"command":"/Users/a/.marshal/bin/marshal hook claude-code"},{"command":"/Users/a/.marshal/bin/marshal hook codex"},{"command":"echo /Users/a/.marshal/bin/marshal hook claude-code"}]}]}}"#
+        try Data(original.utf8).write(to: file)
+        #expect(try HookInstaller.remove(agent: .claudeCode, from: file).removed)
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        let group = ((root["hooks"] as! [String: Any])["Stop"] as! [[String: Any]])[0]
+        let entries = group["hooks"] as! [[String: Any]]
+        #expect(entries.count == 2 && group["matcher"] as? String == "keep")
+        #expect(entries[0]["command"] as? String == "/Users/a/.marshal/bin/marshal hook codex")
+    }
+
+    @Test func unknownCursorVersionIsNotOverwritten() throws {
+        let file = file()
+        let data = Data(#"{"version":99,"hooks":{}}"#.utf8)
+        try data.write(to: file)
+        #expect(throws: (any Error).self) { try HookInstaller.write(agent: .cursor, shimPath: shim, into: file) }
+        #expect(try Data(contentsOf: file) == data)
+    }
+
+    @Test func upgradePreservesCodexGroupIndexesAndCustomFields() throws {
+        let file = file()
+        try Data(#"{"hooks":{"Stop":[{"hooks":[{"command":"/before"}]},{"hooks":[{"command":"/Users/a/.marshal/bin/marshal hook codex","async":true,"custom":"keep"}]},{"hooks":[{"command":"/after"}]}]}}"#.utf8).write(to: file)
+        #expect(try HookInstaller.write(agent: .codex, shimPath: shim, into: file) == .updated)
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        let groups = (root["hooks"] as! [String: Any])["Stop"] as! [[String: Any]]
+        #expect(groups.count == 3)
+        #expect((groups[0]["hooks"] as! [[String: Any]])[0]["command"] as? String == "/before")
+        #expect((groups[2]["hooks"] as! [[String: Any]])[0]["command"] as? String == "/after")
+        let ours = (groups[1]["hooks"] as! [[String: Any]])[0]
+        #expect(ours["async"] as? Bool == false && ours["custom"] as? String == "keep")
+    }
+}
+
+extension ProviderInstallerTests {
+    @Test func quotedCommandExecutesWithSpacesAndApostrophesInPath() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Marshal O'Neil \(UUID())")
+        let executable = folder.appendingPathComponent(".marshal/bin/marshal")
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("#!/bin/sh\nprintf '%s\\n' \"$@\"\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let fragment = HookInstaller.fragment(for: .cursor, shimPath: executable.path)
+        let hooks = fragment["hooks"] as! [String: Any]
+        let command = (hooks["stop"] as! [[String: Any]])[0]["command"] as! String
+        let process = Process(); let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]; process.standardOutput = pipe
+        try process.run(); process.waitUntilExit()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(process.terminationStatus == 0 && output == "hook\ncursor\nstop\n")
+    }
+
+    @Test func configurationStatusDistinguishesMissingOldAndUpdatedHooks() throws {
+        let file = file()
+        #expect(HookInstaller.installation(for: .codex, at: file) == .missing)
+        try Data(#"{"hooks":{"Stop":[{"hooks":[{"command":"/Users/a/.marshal/bin/marshal hook codex","async":true}]}]}}"#.utf8).write(to: file)
+        #expect(HookInstaller.installation(for: .codex, at: file) == .needsUpdate)
+        _ = try HookInstaller.write(agent: .codex, shimPath: shim, into: file)
+        #expect(HookInstaller.installation(for: .codex, at: file) == .ready)
+        try Data("broken json".utf8).write(to: file)
+        #expect(HookInstaller.installation(for: .codex, at: file) == .unreadable)
     }
 }

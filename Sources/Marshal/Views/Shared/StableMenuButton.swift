@@ -63,6 +63,7 @@ enum PanelOptionsMenu {
         }
         menu.addItem(.separator())
         menu.addItem(item("Set up Claude Code") { SetupPresenter.install(.claudeCode) })
+        menu.addItem(item("Set up Cursor") { SetupPresenter.install(.cursor) })
         menu.addItem(item("Set up Codex") { SetupPresenter.install(.codex) })
         menu.addItem(item("Connect Claude usage") { SetupPresenter.connectUsage() })
         menu.addItem(.separator())

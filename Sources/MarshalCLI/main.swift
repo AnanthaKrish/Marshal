@@ -4,8 +4,8 @@ import MarshalCore
 let usage = """
 usage: marshal status --agent <id> --session <id> --state <state> [--title T] [--project P] [--message M]
                         [--app-path <bundle path>] [--app-pid <pid>]
-       marshal hook <claude-code|codex>        (reads the hook JSON on stdin)
-       marshal setup <claude-code|codex> [--write | --remove]
+       marshal hook <claude-code|codex|cursor>        (reads the hook JSON on stdin)
+       marshal setup <claude-code|codex|cursor> [--write | --remove]
        marshal usage setup [--write | --remove] (connects Marshal directly to Claude Code)
        marshal usage claude                     (reads Claude status-line JSON on stdin)
        marshal usage codex                      (reads account limits; starts no chat)
@@ -103,19 +103,25 @@ case "status":
     SocketClient.send(event)
 
 case "hook":
-    guard args.count == 2 else { fail() }
+    // Capture before reading stdin or inspecting ancestry, not after a delayed payload.
+    let invokedAt = Date.now
+    guard args.count == 2 || args.count == 3 else { fail() }
     let agent = parseAgent(args[1])
-    let input = FileHandle.standardInput.readDataToEndOfFile()
-    // Codex expects a JSON reply to Stop, so it must not depend on the rest of the payload
-    // decoding or mapping.
-    if agent == .codex, (try? JSONDecoder().decode(HookEventName.self, from: input))?.name == "Stop" {
-        print("{}")
-    }
-    guard let payload = try? JSONDecoder().decode(HookPayload.self, from: input),
-          var event = HookMapper.map(agent: agent, payload: payload, now: .now) else { break }
+    let hint = args.count == 3 ? args[2] : nil
+    let input = HookInput.read()
+    let eventName = hint ?? input.flatMap { try? JSONDecoder().decode(HookEventName.self, from: $0).name }
+    print(HookMapper.reply(agent: agent, event: eventName))
+    guard let input, let payload = try? JSONDecoder().decode(HookPayload.self, from: input),
+          hint == nil || hint == payload.hookEventName else { break }
+    // A Claude CLI in Cursor's terminal is still Claude. Imported compatibility
+    // hooks have no persistent Claude host and must not create duplicate Claude rows.
+    let host = ProcessAncestry.sessionHost(for: agent)
+    if agent == .claudeCode, ProcessInfo.processInfo.environment["CURSOR_VERSION"] != nil, host == nil { break }
+    guard var event = HookMapper.map(agent: agent, payload: payload, now: invokedAt) else { break }
     let owner = ProcessAncestry.owningApp()
     event.appPath = owner?.bundlePath
     event.appPid = owner?.pid
+    event.host = host
     SocketClient.send(event)
 
 case "setup":
@@ -134,6 +140,8 @@ case "setup":
             case .added:
                 let backup = existed ? " (backup: \(file.lastPathComponent).marshal-backup-<UTC timestamp>)" : ""
                 print("Added hooks to \(file.path)\(backup)")
+            case .updated:
+                print("Updated Marshal hooks in \(file.path); existing hooks kept in place.")
             case .alreadyPresent:
                 print("Hooks already present in \(file.path)")
             }

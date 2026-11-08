@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A native macOS companion for your agents, your focus, and your Mac.</strong><br>
-  Claude Code and Codex status, usage limits, and a little personality — always within a glance.
+  Claude Code, Codex, and Cursor activity, with a little personality — always within a glance.
 </p>
 
 <p align="center">
@@ -38,9 +38,10 @@ Start a task, switch back to your work, and let Pookie keep an eye on it.
 
 | At a glance | What Marshal does |
 | --- | --- |
-| **Agent activity** | Tracks Claude Code and Codex chats, with working, approval, completion, and error states where the agent reports them. |
+| **Agent activity** | Tracks Claude Code (including the `claude` CLI), Codex, and local Cursor Agent chats, with activity and completion states where the agent reports them. |
+| **Honest status** | Stale and disconnected chats keep their last reported activity, without triggering active alerts. |
 | **A useful nudge** | Shows the most important thing first. Open brings the chat's owning app forward. |
-| **Limits & context** | Shows reported account allowances, reset times, and each chat's context usage, with green, amber, and red indicators. |
+| **Limits & context** | Shows reported Claude Code/Codex account allowances, reset times, and chat context usage, with green, amber, and red indicators. |
 | **Time to focus** | Start a 25, 45, or 60 minute timer. Pause and resume from either panel. |
 | **Room to breathe** | Quiet mode silences nudges for 15, 30, or 60 minutes. Hourly stretch reminders offer a gentle break. |
 | **Your Mac's pulse** | CPU, memory, thermal state, and battery live in the footer. Pookie reacts when your Mac feels the pressure. |
@@ -65,7 +66,7 @@ Pick Indigo, Mint, Sunset, Graphite, Rose, or Ocean from the panel's **•••
 
 ## Quick start
 
-Marshal currently builds from source. You'll need **macOS 14 Sonoma or later** and **Xcode 16 or later with Swift 6**. There are no third-party package dependencies.
+The changes on this branch target **v0.2.0**; build from source to try them before the next packaged release. You'll need **macOS 14 Sonoma or later** and **Xcode 16 or later with Swift 6**. There are no third-party package dependencies.
 
 Clone or download this repository, open a terminal in its folder, and run:
 
@@ -85,9 +86,16 @@ Launch Marshal once, then run the command for each agent you use:
 
 # Codex
 ~/.marshal/bin/marshal setup codex --write
+
+# Cursor: local Agent chats
+~/.marshal/bin/marshal setup cursor --write
 ```
 
-Existing hooks are preserved and configuration files are backed up before changes. Start a new agent chat after setup. For Codex, review and trust the new hooks at its next interactive startup.
+Existing hooks are preserved and configuration files are backed up before changes. The same setup commands upgrade older Marshal hooks in place. Restart your agent session after upgrading; for Codex, review and trust the updated hooks at its next interactive startup. You can also use **••• → Set up Claude Code / Codex / Cursor**.
+
+Cursor uses its native user hooks in `~/.cursor/hooks.json`. Local Agent chats report activity and completion; Cursor approval-wait status, account limits, live context percentages, Tab completions, and remote/cloud agents are not tracked. Marshal does not read chat transcripts or change tool permission decisions. See the [Cursor hook reference](https://cursor.com/docs/hooks).
+
+**Stale** means no recent trustworthy update (10 minutes for input waits, 30 minutes for other states). **Disconnected** means Marshal verified that the recorded agent host process exited. Silence alone does not imply disconnection. Open or dismiss these rows from either panel; a new accepted event restores current status. Closed sessions are removed, and inactive rows are cleaned up after 12 hours.
 
 ### Add usage information
 
@@ -109,6 +117,7 @@ Available fields depend on the agent, version, and plan. Missing or stale data s
 ```bash
 ~/.marshal/bin/marshal setup claude-code --remove
 ~/.marshal/bin/marshal setup codex --remove
+~/.marshal/bin/marshal setup cursor --remove
 ~/.marshal/bin/marshal usage setup --remove
 ```
 
